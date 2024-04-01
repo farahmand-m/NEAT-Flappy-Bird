@@ -12,11 +12,12 @@ import random
 import neat
 import pygame
 
+from netvis import draw_neat_network
+
 pygame.font.init()  # init font
 
-WIN_WIDTH = 600
-WIN_HEIGHT = 800
-FLOOR = 730
+WIN_WIDTH = 1360 * 0.75
+WIN_HEIGHT = 768
 STAT_FONT = pygame.font.SysFont("comicsans", 50)
 END_FONT = pygame.font.SysFont("comicsans", 70)
 DRAW_LINES = False
@@ -25,11 +26,13 @@ WIN = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
 pygame.display.set_caption("Flappy Bird")
 
 pipe_img = pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "pipe.png")).convert_alpha())
-bg_img = pygame.transform.scale(pygame.image.load(os.path.join("imgs", "bg.png")).convert_alpha(), (600, 900))
+bg_img = pygame.transform.scale(pygame.image.load(os.path.join("imgs", "bg.png")).convert_alpha(), (1360, 768))
 bird_images = [pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "bird" + str(x) + ".png"))) for x in range(1, 4)]
-base_img = pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "base.png")).convert_alpha())
+floor_image = pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "base.png")).convert_alpha())
 
-gen = 0
+FLOOR = WIN_HEIGHT - floor_image.get_height() / 2
+
+inst = 0
 
 
 class Bird:
@@ -134,7 +137,7 @@ class Pipe:
     represents a pipe object
     """
     gap_size = 200
-    movement_rate = 5
+    movement_rate = 40
 
     def __init__(self, x):
         """
@@ -210,8 +213,8 @@ class Floor:
     Represents the moving floor of the game
     """
     movement_rate = 5
-    floor_width = base_img.get_width()
-    base_image = base_img
+    floor_width = floor_image.get_width()
+    base_image = floor_image
 
     def __init__(self, y):
         """
@@ -280,7 +283,6 @@ def draw_window(win, birds, pipes, floor, score, gen, pipe_ind):
     for pipe in pipes:
         pipe.draw(win)
 
-    floor.draw(win)
     for bird in birds:
         # draw lines from bird to pipe
         if DRAW_LINES:
@@ -298,19 +300,19 @@ def draw_window(win, birds, pipes, floor, score, gen, pipe_ind):
         # draw bird
         bird.draw(win)
 
+    floor.draw(win)
+
     # score
     score_label = STAT_FONT.render("Score: " + str(score), 1, (255, 255, 255))
-    win.blit(score_label, (WIN_WIDTH - score_label.get_width() - 15, 10))
+    win.blit(score_label, (WIN_WIDTH - score_label.get_width() - 25, 10))
 
     # generations
     score_label = STAT_FONT.render("Gens: " + str(gen - 1), 1, (255, 255, 255))
-    win.blit(score_label, (10, 10))
+    win.blit(score_label, (25, 10))
 
     # alive
     score_label = STAT_FONT.render("Alive: " + str(len(birds)), 1, (255, 255, 255))
-    win.blit(score_label, (10, 50))
-
-    pygame.display.update()
+    win.blit(score_label, (25, 60))
 
 
 def eval_genomes(genomes, config):
@@ -319,9 +321,9 @@ def eval_genomes(genomes, config):
     birds and sets their fitness based on the distance they
     reach in the game.
     """
-    global WIN, gen
+    global WIN, inst
     win = WIN
-    gen += 1
+    inst += 1
 
     # start by creating lists holding the genome itself, the
     # neural network associated with the genome and the
@@ -337,21 +339,24 @@ def eval_genomes(genomes, config):
         ge.append(genome)
 
     base = Floor(FLOOR)
-    pipes = [Pipe(700)]
+    pipes = [Pipe(WIN_WIDTH / 2)]
     score = 0
 
     clock = pygame.time.Clock()
 
+    Pipe.movement_rate /= 2
+
     run = True
     while run and len(birds) > 0:
         clock.tick(30)
+
+        Pipe.movement_rate += 0.025
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
                 pygame.quit()
                 quit()
-                break
 
         pipe_ind = 0
         if len(birds) > 0:
@@ -363,8 +368,7 @@ def eval_genomes(genomes, config):
             bird.move()
 
             # send bird location, top pipe location and bottom pipe location and determine from network whether to jump or not
-            output = nets[birds.index(bird)].activate(
-                (bird.y, abs(bird.y - pipes[pipe_ind].height), abs(bird.y - pipes[pipe_ind].bottom)))
+            output = nets[birds.index(bird)].activate((bird.y, abs(bird.y - pipes[pipe_ind].height), abs(bird.y - pipes[pipe_ind].bottom)))
 
             if output[0] > 0.5:  # we use a tanh activation function so result will be between -1 and 1. if over 0.5 jump
                 bird.jump()
@@ -406,12 +410,15 @@ def eval_genomes(genomes, config):
                 ge.pop(birds.index(bird))
                 birds.pop(birds.index(bird))
 
-        draw_window(WIN, birds, pipes, base, score, gen, pipe_ind)
+        draw_window(WIN, birds, pipes, base, score, inst, pipe_ind)
 
-        # break if score gets large enough
-        '''if score > 20:
-            pickle.dump(nets[0],open("best.pickle", "wb"))
-            break'''
+        index, best_genome = max(genomes, key=lambda tup: tup[1].fitness)
+        best_net = neat.nn.FeedForwardNetwork.create(best_genome, config)
+        draw_neat_network(WIN, best_net, 950, 520)
+
+        pygame.display.update()
+
+        print()
 
 
 def run(config_file):
@@ -434,7 +441,7 @@ def run(config_file):
     # p.add_reporter(neat.Checkpointer(5))
 
     # Run for up to 50 generations.
-    winner = p.run(eval_genomes, 50)
+    winner = p.run(eval_genomes, 500)
 
     # show final stats
     print('\nBest genome:\n{!s}'.format(winner))
